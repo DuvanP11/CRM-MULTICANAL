@@ -1,0 +1,48 @@
+{
+  "id": "/dashboard",
+  "name": "CRM Multicanal (Email + WhatsApp)",
+  "short_name": "CRM Multicanal",
+  "description": "CRM unificado de correo y WhatsApp con control de SLA y analítica",
+  "lang": "es",
+  "dir": "ltr",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f6f8",
+  "theme_color": "#111827",
+  "orientation": "portrait",
+  "categories": ["business", "productivity"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Alertas SLA",
+      "short_name": "Alertas",
+      "url": "/alerts"
+    },
+    {
+      "name": "Conversaciones",
+      "short_name": "Chats",
+      "url": "/conversations"
+    }
+  ]
+}

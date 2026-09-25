@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Contact {
+  id            String         @id @default(cuid())
+  name          String?
+  email         String?        @unique
+  phone         String?        @unique
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+}
+
+model Conversation {
+  id              String    @id @default(cuid())
+  contactId       String
+  contact         Contact   @relation(fields: [contactId], references: [id])
+  subject         String?
+  channel         String    // canal del mensaje más reciente: "EMAIL" | "WHATSAPP"
+  status          String    @default("OPEN") // OPEN | RESPONDED | CLOSED
+  lastIncomingAt  DateTime?
+  firstResponseAt DateTime?
+  slaLimitMinutes Int       @default(30)
+  threadRef       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  messages        Message[]
+  alerts          Alert[]
+
+  @@index([status, lastIncomingAt])
+}
+
+model Message {
+  id              String    @id @default(cuid())
+  conversationId  String
+  conversation    Conversation @relation(fields: [conversationId], references: [id])
+  channel         String    // "EMAIL" | "WHATSAPP"
+  externalId      String
+  direction       String    // "INBOUND" | "OUTBOUND"
+  sender          String
+  recipient       String?
+  subject         String?
+  body            String
+  bodyHtml        String?
+  receivedAt      DateTime
+  sentAt          DateTime?
+  isAgentReply    Boolean   @default(false)
+  isFirstResponse Boolean   @default(false)
+  slaSeconds      Int?
+  meta            String?
+  createdAt       DateTime  @default(now())
+
+  @@unique([channel, externalId])
+  @@index([conversationId, receivedAt])
+}
+
+model Alert {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  channel        String       // "DASHBOARD" | "EMAIL" | "TELEGRAM"
+  status         String       @default("PENDING") // PENDING | SENT | ACKED
+  thresholdMin   Int
+  triggeredAt    DateTime     @default(now())
+  escalated      Boolean      @default(false)
+  type           String       @default("SLA") // "SLA" | "ESCALATION"
+  severity       String       @default("WARNING") // "INFO" | "WARNING" | "CRITICAL"
+  createdAt      DateTime     @default(now())
+
+  @@index([severity, status])
+  @@index([type, status])
+  @@index([channel, status])
+  @@index([conversationId, channel])
+}
+
+model Setting {
+  key   String @id
+  value String
+}
