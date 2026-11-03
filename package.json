@@ -30,7 +30,7 @@
     "mailparser": "^3.9.28",
     "next": "14.2.35",
     "next-auth": "^4.24.15",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "^10.0.10",
     "prisma": "^6.19.3",
     "react": "^18",
     "react-dom": "^18",
