@@ -112,8 +112,8 @@ Si `/api/health` responde `{"ok":true,...}` la base está conectada.
 
 | Ruta | Frecuencia | Qué hace |
 |---|---|---|
-| `/api/cron/email-sync` | cada 5 min | Lee el buzón IMAP y crea conversaciones |
-| `/api/cron/alerts` | cada minuto | Evalúa SLA y dispara alertas |
+| `/api/cron/email-sync` | 1 vez al día en `vercel.json` (Hobby); cada 5 min con cron externo | Lee el buzón IMAP y crea conversaciones |
+| `/api/cron/alerts` | 1 vez al día en `vercel.json` (Hobby); cada minuto con cron externo | Evalúa SLA y dispara alertas |
 
 Ambos exigen el header `Authorization: Bearer <CRON_SECRET>` cuando
 `CRON_SECRET` está definido (Vercel lo envía solo en despliegues Pro). Para
@@ -154,3 +154,6 @@ Detalle: [setup-meta.md](setup-meta.md).
 | El build falla con errores de Prisma | Falta `prisma generate`: revisa que `postinstall` exista en `package.json` |
 | Los crons no llegan a dispararse | Plan Hobby, o falta `CRON_SECRET` |
 | Los emails no entran | Contraseña de aplicación en vez de la normal, o IMAP bloqueado |
+
+
+> **Hobby:** `vercel.json` trae un cron diario por endpoint porque Hobby rechaza el despliegue con crons más frecuentes. Para sincronizar de verdad, crea en cron-job.org dos tareas que llamen a ambos endpoints con `Authorization: Bearer <CRON_SECRET>` (email-sync cada 5 min, alerts cada minuto). En Pro puedes volver a poner `*/5 * * * *` y `* * * * *` en `vercel.json`.
