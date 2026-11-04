@@ -11,6 +11,13 @@ export async function checkAndFireAlerts(now: Date = new Date()): Promise<string
   await initPragmas();
   const cfg = await getConfig();
   const fired: string[] = [];
+  const pendingEmail: {
+    convId: string;
+    contactLabel: string;
+    subject: string;
+    minutes: number;
+    escalated: boolean;
+  }[] = [];
 
   // Umbral global desde Setting (si está) o config/env
   const thresholdSetting = await prisma.setting.findUnique({
@@ -50,27 +57,7 @@ export async function checkAndFireAlerts(now: Date = new Date()): Promise<string
       where: { conversationId: convId, channel: "EMAIL", status: { in: ["PENDING", "SENT"] } },
     });
     if (!emailExists && cfg.alertEmailTo) {
-      try {
-        await sendEmail({
-          to: cfg.alertEmailTo,
-          subject: `⏰ SLA excedido: ${contactLabel} sin respuesta hace ${minutes} min`,
-          text: `El contacto "${contactLabel}" (${subject}) lleva ${minutes} minutos sin respuesta.\n\nUmbral: ${thresholdMin} min.\nConversación: ${process.env.NEXTAUTH_URL}/conversations/${convId}`,
-        });
-        await prisma.alert.create({
-          data: {
-            conversationId: convId,
-            channel: "EMAIL",
-            status: "SENT",
-            thresholdMin,
-            triggeredAt: now,
-            type: "SLA",
-            severity: severityFor(false, minutes, thresholdMin),
-          },
-        });
-        fired.push(`email:${convId}`);
-      } catch (err) {
-        console.error("Fallo enviando alerta por email:", err);
-      }
+      pendingEmail.push({ convId, contactLabel, subject, minutes, escalated: false });
     }
 
     // 3) Telegram alert
@@ -107,28 +94,53 @@ export async function checkAndFireAlerts(now: Date = new Date()): Promise<string
         where: { conversationId: convId, channel: "EMAIL", escalated: true },
       });
       if (!escalatedEmail && cfg.alertEmailTo) {
-        try {
-          await sendEmail({
-            to: cfg.alertEmailTo,
-            subject: `🚨 ESCALADO: ${contactLabel} sin respuesta hace ${minutes} min (2× umbral)`,
-            text: `Situación crítica: "${contactLabel}" lleva ${minutes} minutos sin respuesta. Umbral: ${thresholdMin} min.\nConversación: ${process.env.NEXTAUTH_URL}/conversations/${convId}`,
-          });
+        pendingEmail.push({ convId, contactLabel, subject, minutes, escalated: true });
+      }
+    }
+  }
+
+  // Un solo correo resumen por pasada (evita el bloqueo de Gmail por demasiados logins)
+  if (pendingEmail.length > 0 && cfg.alertEmailTo) {
+    const backoff = await prisma.setting.findUnique({ where: { key: "alerts.emailBackoffUntil" } });
+    const blocked = backoff && Number(backoff.value) > now.getTime();
+    if (!blocked) {
+      const base = process.env.NEXTAUTH_URL;
+      const lines = pendingEmail
+        .slice(0, 50)
+        .map(
+          (p) =>
+            `${p.escalated ? "🚨 ESCALADO" : "⏰"} ${p.contactLabel} (${p.subject}) — ${p.minutes} min sin respuesta\n${base}/conversations/${p.convId}`
+        )
+        .join("\n\n");
+      try {
+        await sendEmail({
+          to: cfg.alertEmailTo,
+          subject: `⏰ ${pendingEmail.length} conversación(es) sin responder (umbral ${thresholdMin} min)`,
+          text: `${lines}${pendingEmail.length > 50 ? `\n\n… y ${pendingEmail.length - 50} más.` : ""}`,
+        });
+        for (const p of pendingEmail) {
           await prisma.alert.create({
             data: {
-              conversationId: convId,
+              conversationId: p.convId,
               channel: "EMAIL",
               status: "SENT",
               thresholdMin,
               triggeredAt: now,
-              escalated: true,
-              type: "ESCALATION",
-              severity: "CRITICAL",
+              escalated: p.escalated,
+              type: p.escalated ? "ESCALATION" : "SLA",
+              severity: p.escalated ? "CRITICAL" : severityFor(false, p.minutes, thresholdMin),
             },
           });
-          fired.push(`escalated:${convId}`);
-        } catch (err) {
-          console.error("Fallo en alerta escalada por email:", err);
+          fired.push(`${p.escalated ? "escalated" : "email"}:${p.convId}`);
         }
+      } catch (err) {
+        console.error("Fallo enviando resumen de alertas por email:", err);
+        const until = String(now.getTime() + 30 * 60 * 1000);
+        await prisma.setting.upsert({
+          where: { key: "alerts.emailBackoffUntil" },
+          update: { value: until },
+          create: { key: "alerts.emailBackoffUntil", value: until },
+        });
       }
     }
   }
