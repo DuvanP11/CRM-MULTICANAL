@@ -5,6 +5,7 @@ import { initPragmas } from "@/lib/prisma";
 
 export interface FetchedEmail extends ParsedEmail {
   uid: number;
+  seen: boolean; // ya leído en Gmail al momento de bajarlo
 }
 
 export async function connectImap() {
@@ -50,13 +51,13 @@ export async function fetchNewEmails(client: ImapFlow, lastUid: number | null, l
     let maxUid = lastUid || 0;
 
     // fetchAll: iterar por lotes fuera del "lock wait" para no bloquear el conexión
-    const messages = client.fetch(range, { source: true, uid: true });
+    const messages = client.fetch(range, { source: true, uid: true, flags: true });
     for await (const message of messages) {
-      const msg = message as unknown as { uid: number; source: Buffer };
+      const msg = message as unknown as { uid: number; source: Buffer; flags?: Set<string> };
       if (msg.uid > maxUid) maxUid = msg.uid;
       try {
         const parsed = await parseEmail(msg.source);
-        emails.push({ ...parsed, uid: msg.uid });
+        emails.push({ ...parsed, uid: msg.uid, seen: !!msg.flags?.has("\\Seen") });
       } catch (err) {
         console.error(`Error parseando email uid=${msg.uid}:`, err);
       }
@@ -68,9 +69,34 @@ export async function fetchNewEmails(client: ImapFlow, lastUid: number | null, l
   }
 }
 
+/**
+ * UIDs de INBOX que ya están leídos en Gmail (desde minUid en adelante).
+ */
+export async function fetchSeenUids(client: ImapFlow, minUid: number): Promise<Set<number>> {
+  const lock = await client.getMailboxLock("INBOX");
+  try {
+    const res = await client.search({ seen: true, uid: `${minUid}:*` }, { uid: true });
+    return new Set(Array.isArray(res) ? res : []);
+  } finally {
+    lock.release();
+  }
+}
+
+/** Correos que el propio CRM se manda (alertas de SLA): no deben convertirse en conversaciones. */
+function isOwnAlert(email: FetchedEmail, ownAddress: string): boolean {
+  const from = (email.fromEmail || "").toLowerCase();
+  const subject = email.subject || "";
+  return (
+    from === ownAddress.toLowerCase() &&
+    /conversaci[oó]n\(es\) sin responder|SLA excedido|ESCALADO/i.test(subject)
+  );
+}
+
 export async function processEmails(emails: FetchedEmail[]) {
   await initPragmas();
+  const cfg = await getConfig();
   for (const email of emails) {
+    if (cfg.imapUser && isOwnAlert(email, cfg.imapUser)) continue;
     await processOne(email);
   }
 }
@@ -114,6 +140,10 @@ async function processOne(email: FetchedEmail) {
   });
 
   await slaEngine.onInbound(routed.conversationId, email.date);
+  if (email.seen) {
+    // Ya lo abriste en Gmail: queda como leído y no cuenta para el SLA.
+    await prisma.conversation.update({ where: { id: routed.conversationId }, data: { status: "READ" } });
+  }
 
   console.log(
     `📬 Email procesado: ${email.fromEmail} "${email.subject || ""}" → ${routed.isNew ? "NUEVA conversación" : "hilo existente"}`

@@ -135,6 +135,7 @@ function FilterChip({
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; color: string }> = {
     OPEN: { label: "Sin responder", color: "var(--danger)" },
+    READ: { label: "Leída", color: "var(--muted)" },
     RESPONDED: { label: "Respondida", color: "var(--success)" },
     CLOSED: { label: "Cerrada", color: "var(--muted)" },
   };

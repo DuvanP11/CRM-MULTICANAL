@@ -1,7 +1,7 @@
 import { initPragmas, prisma } from "@/lib/prisma";
 import { getEnv } from "@/lib/env";
 import { getConfig } from "@/lib/config";
-import { connectImap, fetchNewEmails, processEmails } from "@/services/email/imap";
+import { connectImap, fetchNewEmails, fetchSeenUids, processEmails } from "@/services/email/imap";
 
 const env = getEnv();
 
@@ -18,21 +18,38 @@ async function setLastUid(uid: number) {
   });
 }
 
-async function markSeen(uids: number[]) {
-  if (uids.length === 0) return;
-  try {
-    const client = await connectImap();
-    const lock = await client.getMailboxLock("INBOX");
+/**
+ * Si ya abriste el correo en Gmail (marca \\Seen), la conversación pasa a LEÍDA
+ * y deja de contar para el SLA. Reutiliza la conexión IMAP abierta.
+ */
+async function syncReadStatus(client: Awaited<ReturnType<typeof connectImap>>): Promise<number> {
+  const msgs = await prisma.message.findMany({
+    where: { channel: "EMAIL", direction: "INBOUND", conversation: { status: "OPEN" } },
+    select: { conversationId: true, meta: true, receivedAt: true },
+    orderBy: { receivedAt: "desc" },
+  });
+  const latestUid = new Map<string, number>();
+  for (const m of msgs) {
+    if (latestUid.has(m.conversationId)) continue; // solo el más reciente de cada hilo
     try {
-      await client.messageFlagsAdd({ uid: uids.join(",") }, ["\\Seen"]);
-      console.log(`📬 Marcados ${uids.length} emails como leídos.`);
-    } finally {
-      lock.release();
-      await client.logout();
+      const uid = Number(JSON.parse(m.meta || "{}").uid);
+      if (uid) latestUid.set(m.conversationId, uid);
+    } catch {
+      /* meta sin uid */
     }
-  } catch (err) {
-    console.error("No se pudo marcar como leído:", err);
   }
+  if (latestUid.size === 0) return 0;
+
+  const minUid = Math.min(...Array.from(latestUid.values()));
+  const seen = await fetchSeenUids(client, minUid);
+  const readIds = Array.from(latestUid.entries()).filter(([, uid]) => seen.has(uid)).map(([id]) => id);
+  if (readIds.length > 0) {
+    await prisma.conversation.updateMany({
+      where: { id: { in: readIds }, status: "OPEN" },
+      data: { status: "READ" },
+    });
+  }
+  return readIds.length;
 }
 
 export async function runEmailSync(): Promise<{ processed: number; maxUid: number }> {
@@ -48,12 +65,16 @@ export async function runEmailSync(): Promise<{ processed: number; maxUid: numbe
     client = await connectImap();
     const lastUid = await getLastUid();
     const { emails, maxUid } = await fetchNewEmails(client, lastUid, cfg.imapLookbackDays);
+    const marked = await syncReadStatus(client).catch((e) => {
+      console.error("Error sincronizando leídos:", e);
+      return 0;
+    });
+    if (marked > 0) console.log(`📬 ${marked} conversaciones marcadas como leídas (ya abiertas en Gmail).`);
     await client.logout();
 
     if (emails.length > 0) {
       await processEmails(emails);
       await setLastUid(maxUid);
-      await markSeen(emails.map((e) => e.uid));
       console.log(`📬 Sync completo: ${emails.length} nuevos, último UID ${maxUid}.`);
     } else {
       console.log(`📬 Sync: sin emails nuevos (UID${lastUid ? ` > ${lastUid}` : ""}).`);
