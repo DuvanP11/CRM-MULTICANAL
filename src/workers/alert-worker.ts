@@ -52,7 +52,7 @@ export async function checkAndFireAlerts(now: Date = new Date()): Promise<string
     if (!emailExists && cfg.alertEmailTo) {
       try {
         await sendEmail({
-          to: env.alertEmailTo,
+          to: cfg.alertEmailTo,
           subject: `⏰ SLA excedido: ${contactLabel} sin respuesta hace ${minutes} min`,
           text: `El contacto "${contactLabel}" (${subject}) lleva ${minutes} minutos sin respuesta.\n\nUmbral: ${thresholdMin} min.\nConversación: ${process.env.NEXTAUTH_URL}/conversations/${convId}`,
         });
@@ -109,7 +109,7 @@ export async function checkAndFireAlerts(now: Date = new Date()): Promise<string
       if (!escalatedEmail && cfg.alertEmailTo) {
         try {
           await sendEmail({
-            to: env.alertEmailTo,
+            to: cfg.alertEmailTo,
             subject: `🚨 ESCALADO: ${contactLabel} sin respuesta hace ${minutes} min (2× umbral)`,
             text: `Situación crítica: "${contactLabel}" lleva ${minutes} minutos sin respuesta. Umbral: ${thresholdMin} min.\nConversación: ${process.env.NEXTAUTH_URL}/conversations/${convId}`,
           });
