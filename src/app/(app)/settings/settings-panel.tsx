@@ -268,6 +268,9 @@ function Fields({
             <FieldLabel>{f.label}</FieldLabel>
             <input
               type={f.type || "text"}
+              name={f.name}
+              autoComplete={f.type === "password" ? "new-password" : "off"}
+              data-lpignore="true"
               value={values[f.name] ?? ""}
               placeholder={current || f.placeholder || ""}
               onChange={(e) => onChange(f.name, e.target.value)}
